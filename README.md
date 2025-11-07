@@ -136,7 +136,7 @@ Assistant:
 
 ```
 
-Ask the question like:
+Ask the questions from the bot like:
 - List down all the urls of sites which i visited today.  (From Browser History)
 - Provide me the summary of my activity of my files and folders which i modfied recently
 - Please provide me the git commit history of my following repo(repo path or name)
