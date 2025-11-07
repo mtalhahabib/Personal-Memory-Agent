@@ -1,6 +1,6 @@
 # 🧠 Personal Memory Agent
 
-A **local AI memory system** that keeps track of your **file activity** and **Git commits**, and lets you **chat** with your digital memory using **Gemini CLI** or **Ollama (Llama3)**.  
+A **local AI memory system** that keeps track of your **file activity**, **browser history**, **Notes** and **Git commits**, and lets you **chat** with your digital memory using **Gemini CLI** or **Ollama (Llama3)**.  
 Fully offline. Privacy-safe. Extendable.
 
 ---
@@ -10,10 +10,11 @@ Fully offline. Privacy-safe. Extendable.
 This project turns your local machine into a personal memory assistant that can:
 - 📂 Track all file creations, modifications, and deletions.
 - 🧾 Log new Git commits across repositories.
+- 🧾 Check all the browser history
+- Chat with you Notes
 - 💬 Chat naturally about your recent activity using local LLMs.
 - 🔒 Store everything locally in SQLite databases for full privacy.
 
-You can later extend this system to include **notes**, **browser history**, or even an **Electron desktop UI**.
 
 ---
 
@@ -41,8 +42,10 @@ python -m venv .venv
 # or
 source .venv/bin/activate  # for macOS/Linux
 pip install -r requirements.txt
-Create a .env file in the project root with:
 ```
+
+
+Create a .env file in the project root with:
 bash
 Copy code
 
@@ -71,15 +74,6 @@ EVENT_DB=events.db
 DEBOUNCE_SEC=0.4
 Install Gemini CLI for LLM access:
 ```
-bash
-Copy code
-```
-npm install -g @google/gemini-cli
-gemini login
-# or set manually
-set GEMINI_API_KEY=your_api_key_here   # Windows
-export GEMINI_API_KEY=your_api_key_here  # macOS/Linux
-```
 
 
 
@@ -87,11 +81,15 @@ export GEMINI_API_KEY=your_api_key_here  # macOS/Linux
 bash
 Copy code
 ```
+Run all these commands in separate terminals
 # 🗂️ Watch local file system for changes
 python watcher.py
 
 # 🧾 Monitor Git repositories for new commits
 python git_watcher.py
+
+# Run your Indexer file
+python indexer.py
 
 # 💬 Chat with your local memory
 python chat.py
@@ -116,25 +114,9 @@ Planned improvements include:
 
 🌐 Browser history context memory
 
-🖥️ Electron-based desktop app UI
 
 🧬 Enhanced embedding search (via Ollama or Gemini embeddings)
 
-##🧩 Project Structure
-bash
-Copy code
-```
-Personal-Memory-Agent/
-│
-├── watcher.py          # Watches local file system for changes
-├── git_watcher.py      # Monitors Git repositories for new commits
-├── chat.py             # Chat interface with LLM backend
-├── .env                # Environment configuration
-├── requirements.txt    # Python dependencies
-├── memory_vectors.db   # Local memory embeddings DB
-├── events.db           # File and commit logs
-└── README.md           # Documentation
-```
 ##💬 Example Interaction
 bash
 Copy code
