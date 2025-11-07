@@ -1,0 +1,17 @@
+# Ignore local database files and temporary artifacts
+*.db
+chrome_history_temp.db
+memory_vectors.db
+events.db
+
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+.venv/
+venv/
+
+# OS
+Thumbs.db
+desktop.ini
