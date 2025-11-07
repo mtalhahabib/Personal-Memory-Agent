@@ -53,6 +53,9 @@ Copy code
 # 🧭 Paths to watch (comma-separated)
 WATCH_PATHS=E:\CodeAcm
 
+# 🧭 Git Paths to watch (comma-separated)
+GIT_WATCH_PATHS=E:\CodeAcm\CodeAcme Repos\realEstate_frontend_livekit
+
 # 🚫 Excluded folders or patterns
 EXCLUDE_PATTERNS=.git,node_modules,__pycache__,.venv,.idea
 
@@ -132,3 +135,8 @@ Assistant:
 - [2025-11-05 09:20:30] COMMIT: "Refactored data model in realEstate_frontend"
 
 ```
+
+Ask the question like:
+- List down all the urls of sites which i visited today.  (From Browser History)
+- Provide me the summary of my activity of my files and folders which i modfied recently
+- Please provide me the git commit history of my following repo(repo path or name)
