@@ -7,3 +7,5 @@ python-magic-bin
 pdfminer.six
 python-docx
 tqdm
+google-generativeai
+dotenv

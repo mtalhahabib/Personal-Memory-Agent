@@ -47,6 +47,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 import subprocess
 import json
+from indexer import extract_text_for_path
 
 # --------------------------------------------------------------------
 # 🔧 Setup and Configuration
@@ -167,6 +168,42 @@ if __name__ == "__main__":
         query = input("You: ").strip()
         if query.lower() in ["exit", "quit", "bye"]:
             break
+
+        # Quick path request: if the user explicitly asks to share the contents
+        # of a specific file, extract and return the file text directly instead
+        # of relying on semantic search (which may use stub embeddings).
+        lowq = query.lower()
+        if lowq.startswith("share the contents of") or lowq.startswith("share the contents"):
+            try:
+                # naive parse: take everything after the word 'of'
+                if ' of ' in lowq:
+                    idx = lowq.index(' of ')
+                    path = query[idx + 4 :].strip().strip('"\'')
+                else:
+                    # fallback: last token
+                    path = query.split()[-1].strip().strip('"\'')
+
+                # if user provided a basename, try to resolve from recent file events
+                if not (os.path.isabs(path) or '\\' in path or '/' in path):
+                    recent = search_recent_files(EVENT_DB, limit=50)
+                    candidates = [r.split(': ', 1)[1] for r in recent if ': ' in r]
+                    matches = [p for p in candidates if os.path.basename(p).lower() == path.lower()]
+                    if matches:
+                        path = matches[0]
+
+                if not os.path.exists(path):
+                    print(f"\nAssistant:\n[Error] file not found: {path}\n")
+                else:
+                    content = extract_text_for_path(path)
+                    if not content:
+                        print(f"\nAssistant:\n[No extractable text found in {path}]\n")
+                    else:
+                        # limit to a reasonable display size
+                        display = content[:4000] + ("\n... (truncated)" if len(content) > 4000 else "")
+                        print("\nAssistant:\n" + display + "\n")
+            except Exception as e:
+                print(f"\nAssistant:\n[Error extracting file path: {e}]\n")
+            continue
 
 
 
