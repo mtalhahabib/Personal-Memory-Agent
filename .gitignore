@@ -6,7 +6,6 @@ events.db
 
 # Environment / secrets
 .env
-
 # Python
 __pycache__/
 .venv/
