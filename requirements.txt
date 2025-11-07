@@ -1,0 +1,9 @@
+watchdog
+python-dotenv
+numpy
+requests
+beautifulsoup4
+python-magic-bin
+pdfminer.six
+python-docx
+tqdm
