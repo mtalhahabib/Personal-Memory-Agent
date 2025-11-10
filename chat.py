@@ -3,7 +3,19 @@
 # --------------------------------------------------------------------
 from vectorstore import VectorStore
 from llm_client import LLMClient
+import os
+import sqlite3
+import time
+import shutil
+import google.generativeai as genai
+from dotenv import load_dotenv
+import subprocess
+import json
+from indexer import extract_text_for_path
 
+# --------------------------------------------------------------------
+# 🔧 Setup and Configuration
+# --------------------------------------------------------------------
 def semantic_search_documents(query, top_k=3):
     vs = VectorStore()
     client = LLMClient()
@@ -39,19 +51,7 @@ def search_recent_browser_history(db_path, days=2):
         ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(visit_time))
         formatted.append(f"[{ts_str}] {title} — {url}")
     return formatted
-import os
-import sqlite3
-import time
-import shutil
-import google.generativeai as genai
-from dotenv import load_dotenv
-import subprocess
-import json
-from indexer import extract_text_for_path
 
-# --------------------------------------------------------------------
-# 🔧 Setup and Configuration
-# --------------------------------------------------------------------
 load_dotenv()
 
 VECTORDATA = os.environ.get("VECTORTABLE", "memory_vectors.db")
@@ -137,23 +137,79 @@ def search_recent_files(db_path, limit=10):
 # --------------------------------------------------------------------
 # 🧩 Git Commit Memory Context
 # --------------------------------------------------------------------
+def list_all_repositories():
+    """List all discovered git repositories."""
+    import git_watcher
+    # Get base paths from environment
+    base_paths = [p.strip() for p in os.environ.get("WATCH_PATHS", "").split(",") if p.strip()]
+    if not base_paths:
+        base_paths = [os.path.dirname(os.path.dirname(os.getcwd()))]  # Default to parent of parent dir
+    
+    all_repos = []
+    for path in base_paths:
+        if os.path.exists(path):
+            repos = git_watcher.discover_git_repos(path)
+            all_repos.extend(repos)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_repos = []
+    for repo in all_repos:
+        if repo not in seen:
+            seen.add(repo)
+            unique_repos.append(repo)
+    
+    formatted = []
+    for repo_path in unique_repos:
+        repo_name = os.path.basename(repo_path.rstrip('\\')).rstrip('/')
+        repo_dir = os.path.dirname(repo_path)
+        formatted.append(f"\n📦 Repository: {repo_name}")
+        formatted.append(f"📂 Directory: {repo_dir}")
+    
+    return formatted
+
 def search_recent_commits(db_path, limit=5):
-    """Fetch most recent git commit events."""
+    """Fetch most recent git commits, grouped by repository."""
     if not os.path.exists(db_path):
         return []
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
     try:
-        c.execute("SELECT repo, commit_hash, author, date, message FROM git_commits ORDER BY timestamp DESC LIMIT ?", (limit,))
-        rows = c.fetchall()
+        # First get all unique repositories
+        c.execute("SELECT DISTINCT repo FROM git_commits ORDER BY repo")
+        repos = c.fetchall()
+        
+        formatted = []
+        for (repo_path,) in repos:
+            # Get recent commits for each repository
+            c.execute("""
+                SELECT repo_name, repo_dir, commit_hash, author, date, message 
+                FROM git_commits 
+                WHERE repo = ? 
+                ORDER BY timestamp DESC 
+                LIMIT ?
+            """, (repo_path, limit))
+            
+            commits = c.fetchall()
+            if commits:
+                # Add repository header
+                commits = [commit for commit in commits if commit[0]]  # Filter out rows with empty repo_name
+                if not commits:
+                    continue
+                    
+                repo_name, repo_dir = commits[0][:2]  # First row's repo info
+                formatted.append(f"\n📦 Repository: {repo_name}")
+                formatted.append(f"📂 Directory: {repo_dir}")
+                
+                # Add each commit (skip repo_name, repo_dir fields)
+                for _, _, commit_hash, author, date, message in commits:
+                    formatted.append(f"  🔖 {commit_hash[:8]}")
+                    formatted.append(f"  👤 {author} on {date}")
+                    formatted.append(f"  💬 {message}\n")
     except sqlite3.OperationalError:
         conn.close()
         return []  # Table might not exist yet
     conn.close()
-
-    formatted = []
-    for repo, commit_hash, author, date, message in rows:
-        formatted.append(f"📦 Repo: {repo}\n🔖 Commit: {commit_hash}\n👤 {author} on {date}\n💬 {message}")
     return formatted
 
 # --------------------------------------------------------------------
@@ -212,8 +268,13 @@ if __name__ == "__main__":
         recent_commits = search_recent_commits(EVENT_DB, limit=5)
         recent_browser = search_recent_browser_history(EVENT_DB, days=2)
         doc_search = semantic_search_documents(query, top_k=3)
+        all_repos = list_all_repositories()
 
         context = ""
+        # Always include repository information in context
+        if all_repos:
+            context += "📦 All Git repositories:\n" + "\n".join(all_repos) + "\n\n"
+        
         if recent_files:
             context += "📁 Recent file activity:\n" + "\n".join(recent_files) + "\n\n"
         if recent_commits:
@@ -223,13 +284,17 @@ if __name__ == "__main__":
         if doc_search:
             context += "📄 Relevant Document Content:\n" + "\n\n".join(doc_search) + "\n\n"
         if not context:
-            context = "No recent file, commit, browser, or document activity logged."
+            context = "No repositories found or recent activity logged."
 
         full_prompt = (
-            f"You are a personal memory assistant.\n"
+            f"You are a personal memory assistant with access to information about Git repositories and recent activity.\n"
+            f"When answering questions about repositories:\n"
+            f"- Include repository names and their locations\n"
+            f"- Mention recent commits if relevant\n"
+            f"- Provide context about the repository's purpose if available\n\n"
             f"User asked: {query}\n\n"
             f"{context}"
-            f"Answer clearly and concisely."
+            f"Answer clearly and concisely, focusing on the most relevant information for the user's question."
         )
 
         if backend == "gemini":

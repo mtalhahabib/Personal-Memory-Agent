@@ -16,7 +16,7 @@ def discover_git_repos(start_path):
     """Recursively discover git repositories under a path."""
     git_repos = []
     
-    print(f"[git_watcher] Scanning directory: {start_path}")
+    # print(f"[git_watcher] Scanning directory: {start_path}")
     try:
         for root, dirs, _ in os.walk(start_path):
             if '.git' in dirs:
@@ -24,10 +24,10 @@ def discover_git_repos(start_path):
                 repo_path = root
                 try:
                     # Verify it's a valid git repo by running a git command
-                    print(f"[git_watcher] Found potential git repo: {repo_path}")
+                    # print(f"[git_watcher] Found potential git repo: {repo_path}")
                     subprocess.check_output(['git', '-C', repo_path, 'rev-parse', '--git-dir'], 
                                          stderr=subprocess.DEVNULL)
-                    print(f"[git_watcher] Confirmed valid git repo: {repo_path}")
+                    # print(f"[git_watcher] Confirmed valid git repo: {repo_path}")
                     git_repos.append(repo_path)
                     # Don't recurse into this repo's subdirectories
                     dirs.remove('.git')
@@ -54,7 +54,9 @@ def init_db():
     c.execute("""
         CREATE TABLE IF NOT EXISTS git_commits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            repo TEXT,
+            repo TEXT,            -- Full path to repo
+            repo_name TEXT,       -- Name of repo (last component of path)
+            repo_dir TEXT,        -- Directory containing repo
             commit_hash TEXT,
             author TEXT,
             date TEXT,
@@ -147,10 +149,17 @@ def scan_repos(conn):
                 c.execute("SELECT 1 FROM git_commits WHERE commit_hash=? AND repo=?", 
                          (commit["hash"], path))
                 if not c.fetchone():
+                    # Get repository name and directory
+                    repo_name = os.path.basename(path.rstrip('\\')).rstrip('/')
+                    repo_dir = os.path.dirname(path)
+                    
                     c.execute("""
-                        INSERT INTO git_commits (repo, commit_hash, author, date, message, timestamp)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (path, commit["hash"], commit["author"], commit["date"], 
+                        INSERT INTO git_commits (
+                            repo, repo_name, repo_dir, commit_hash, 
+                            author, date, message, timestamp
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (path, repo_name, repo_dir, commit["hash"], 
+                         commit["author"], commit["date"], 
                          commit["message"], time.time()))
                     conn.commit()
                     print(f"[git_watcher] New commit logged: {commit['message']} ({path})")
