@@ -51,7 +51,7 @@ class LLMClient:
         if self._genai_available:
             genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
-        print(f"[LLMClient] backend={self.backend}, gemini_has_embeddings={self._gemini_has_embeddings}")
+        #print(f"[LLMClient] backend={self.backend}, gemini_has_embeddings={self._gemini_has_embeddings}")
 
     # ----------------
     # Public methods
@@ -86,7 +86,7 @@ class LLMClient:
             if self._gemini_has_embeddings:
                 return self._embed_gemini(texts)
             else:
-                print("[LLMClient] gemini CLI does not expose an 'embeddings' subcommand — using Google Generative AI embeddings instead.")
+                #print("[LLMClient] gemini CLI does not expose an 'embeddings' subcommand — using Google Generative AI embeddings instead.")
                 return self._embed_google(texts)
 
         if self.backend == 'ollama':
