@@ -1,21 +1,8 @@
 # llm_client.py
 """
-LLM client adapted for Gemini CLI v0.12.0.
-
-Behavior:
-- Uses Gemini CLI for chat via the positional prompt and --output-format json when possible.
-- Detects whether `gemini embeddings` is available; if not, falls back to deterministic stub vectors.
-- Keeps stub mode so the rest of the pipeline remains runnable for testing.
-
-Set environment variable LLM_BACKEND=ollama to force ollama (or 'stub' to force stub).
+Professional LLM client for Gemini CLI, Ollama CLI, or Google Generative AI.
+Supports embeddings and chat with fallback stubs.
 """
-
-try:
-    from google import generativeai as genai
-    GENAI_AVAILABLE = True
-except ImportError:
-    GENAI_AVAILABLE = False
-
 import os
 import shutil
 import subprocess
@@ -24,204 +11,98 @@ import json
 import numpy as np
 from typing import List, Optional
 
+VECTOR_DIM = 3072
 GEMINI_CMD = shutil.which('gemini') or shutil.which('gemini-cli')
 OLLAMA_CMD = shutil.which('ollama')
 
-VECTOR_DIM = 3072  # match Gemini embeddings dimension
+try:
+    from google import generativeai as genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
 
 class LLMClient:
     def __init__(self, backend_override: Optional[str] = None):
-        env = os.environ.get('LLM_BACKEND')
-        self.backend = backend_override or env or None
-
-        if not self.backend:
-            if GEMINI_CMD:
-                self.backend = 'gemini'
-            elif OLLAMA_CMD:
-                self.backend = 'ollama'
-            else:
-                self.backend = 'stub'
-
-        # Check if Gemini CLI has embeddings subcommand
-        self._gemini_has_embeddings = False
-        if self.backend == 'gemini' and GEMINI_CMD:
-            self._gemini_has_embeddings = self._check_gemini_embeddings_available()
-
-        self._genai_available = GENAI_AVAILABLE and os.environ.get("GEMINI_API_KEY")
+        self.backend = backend_override or os.environ.get('LLM_BACKEND') or self._detect_backend()
+        self._genai_available = GENAI_AVAILABLE and bool(os.environ.get("GEMINI_API_KEY"))
         if self._genai_available:
             genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
-        #print(f"[LLMClient] backend={self.backend}, gemini_has_embeddings={self._gemini_has_embeddings}")
+    def _detect_backend(self):
+        if GEMINI_CMD:
+            return "gemini"
+        if OLLAMA_CMD:
+            return "ollama"
+        return "stub"
 
     # ----------------
     # Public methods
     # ----------------
-    def _embed_google(self, texts: List[str]) -> List[np.ndarray]:
-        if not self._genai_available:
-            print("[LLMClient] google-generativeai embeddings not available — using stub vectors.")
+    def embed(self, texts: List[str]) -> List[np.ndarray]:
+        if self.backend == "gemini":
+            return self._embed_gemini(texts)
+        if self.backend == "ollama":
             return [self._stub_vector(t) for t in texts]
+        return [self._stub_vector(t) for t in texts]
 
+    def generate(self, prompt: str, max_tokens=512) -> str:
+        if self.backend == "gemini":
+            return self._chat_gemini(prompt)
+        if self.backend == "ollama":
+            return self._chat_ollama(prompt)
+        return self._stub_chat(prompt)
+
+    # ----------------
+    # Private helpers
+    # ----------------
+    def _embed_gemini(self, texts: List[str]) -> List[np.ndarray]:
         vectors = []
         for t in texts:
-            try:
-                resp = genai.embed_content(
-                    model="gemini-embedding-001",
-                    content=t
-                )
-                vec = np.array(resp["embedding"], dtype="float32")
-                # ensure consistent VECTOR_DIM
-                if vec.size != VECTOR_DIM:
-                    vec = vec[:VECTOR_DIM] if vec.size > VECTOR_DIM else np.pad(vec, (0, VECTOR_DIM - vec.size))
-            except Exception as e:
-                print(f"[LLMClient] Google embeddings error: {e}, using stub vector instead.")
+            vec = None
+            if self._genai_available:
+                try:
+                    resp = genai.embed_content(model="gemini-embedding-001", content=t)
+                    vec = np.array(resp["embedding"], dtype="float32")
+                    if vec.size != VECTOR_DIM:
+                        vec = np.pad(vec, (0, VECTOR_DIM - vec.size), mode='wrap')[:VECTOR_DIM]
+                except Exception:
+                    vec = self._stub_vector(t)
+            else:
                 vec = self._stub_vector(t)
             vectors.append(vec)
         return vectors
 
-    def embed(self, texts: List[str]) -> List[np.ndarray]:
-        """
-        Return list of numpy arrays (dtype=float32).
-        """
-        if self.backend == 'gemini':
-            if self._gemini_has_embeddings:
-                return self._embed_gemini(texts)
-            else:
-                #print("[LLMClient] gemini CLI does not expose an 'embeddings' subcommand — using Google Generative AI embeddings instead.")
-                return self._embed_google(texts)
-
-        if self.backend == 'ollama':
-            print("[LLMClient] ollama selected for embeddings: returning stub vectors.")
-            return [self._stub_vector(t) for t in texts]
-
-        # stub fallback
-        return [self._stub_vector(t) for t in texts]
-
-    def generate(self, system_prompt: str, user_prompt: str, context: str = '', max_tokens: int = 512) -> str:
-        """
-        Return string reply from the LLM.
-        """
-        if self.backend == 'gemini':
-            return self._chat_gemini(system_prompt, user_prompt, context, max_tokens)
-        if self.backend == 'ollama':
-            return self._chat_ollama(system_prompt, user_prompt, context, max_tokens)
-        return f"[stub reply] Based on context, I would answer: {user_prompt}"
-
-    # ----------------
-    # Gemini CLI helpers
-    # ----------------
-    def _check_gemini_embeddings_available(self) -> bool:
+    def _chat_gemini(self, prompt: str) -> str:
+        if not self._genai_available:
+            return "[Gemini Error] API key not found."
         try:
-            proc = subprocess.run([GEMINI_CMD, 'embed', '--help'], capture_output=True, text=True, check=False, timeout=3)
-            return bool(proc.stdout or proc.stderr)
-        except Exception:
-            return False
-
-    def _embed_gemini(self, texts: List[str]) -> List[np.ndarray]:
-        vectors = []
-        for t in texts:
-            with tempfile.NamedTemporaryFile('w', delete=False, encoding='utf-8') as tf:
-                tf.write(t)
-                tf.flush()
-                fname = tf.name
-
-            vec = None
-            try_cmds = [[GEMINI_CMD, 'embed', fname, '--output-format', 'json']]
-
-            for cmd in try_cmds:
-                try:
-                    proc = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=15)
-                    out = (proc.stdout or proc.stderr or '').strip()
-                    if not out:
-                        continue
-
-                    try:
-                        parsed = json.loads(out)
-                        if isinstance(parsed, dict) and 'embedding' in parsed:
-                            vec = np.array(parsed['embedding'], dtype='float32')
-                        elif isinstance(parsed, list):
-                            vec = np.array(parsed, dtype='float32')
-                    except Exception:
-                        vec = self._floats_from_text(out)
-
-                    if vec is not None:
-                        if vec.size != VECTOR_DIM:
-                            vec = vec[:VECTOR_DIM] if vec.size > VECTOR_DIM else np.pad(vec, (0, VECTOR_DIM - vec.size))
-                        break
-                except Exception:
-                    continue
-
-            if vec is None:
-                vec = self._stub_vector(t)
-            vectors.append(vec.astype('float32'))
-            try:
-                os.unlink(fname)
-            except Exception:
-                pass
-        return vectors
-
-    def _chat_gemini(self, system_prompt: str, user_prompt: str, context: str = '', max_tokens: int = 512) -> str:
-        prompt = f"{system_prompt}\n\nCONTEXT:\n{context}\n\nUSER:\n{user_prompt}"
-        cmd = [GEMINI_CMD, '-o', 'json', prompt]
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=60)
-            out = (proc.stdout or proc.stderr or '').strip()
-            try:
-                parsed = json.loads(out)
-                if isinstance(parsed, dict):
-                    for key in ('output', 'response', 'content', 'result', 'choices'):
-                        if key in parsed:
-                            val = parsed[key]
-                            if isinstance(val, list):
-                                if isinstance(val[0], dict) and 'text' in val[0]:
-                                    return val[0].get('text') or json.dumps(val)
-                                if isinstance(val[0], str):
-                                    return '\n'.join(val)
-                            if isinstance(val, str):
-                                return val
-                    return json.dumps(parsed)
-                if isinstance(parsed, list):
-                    flat = [item.get('text') or item.get('content') for item in parsed if isinstance(item, dict)]
-                    return '\n'.join(flat) if flat else str(parsed)
-                return out
-            except Exception:
-                return out
+            model = genai.GenerativeModel(os.environ.get("GEMINI_MODEL", "gemini-1.5-flash"))
+            resp = model.generate_content(prompt)
+            return resp.text.strip() if resp.text else "[Gemini returned empty response]"
         except Exception as e:
-            return f"[gemini chat error: {e}]"
+            return f"[Gemini Error] {e}"
 
-    # ----------------
-    # Ollama fallback
-    # ----------------
-    def _chat_ollama(self, system_prompt: str, user_prompt: str, context: str = '', max_tokens: int = 512) -> str:
-        prompt = f"{system_prompt}\n\nCONTEXT:\n{context}\n\nUSER:\n{user_prompt}"
+    def _chat_ollama(self, prompt: str) -> str:
         if not OLLAMA_CMD:
-            return "[ollama not installed]"
+            return "[Ollama Error] CLI not installed."
         try:
-            proc = subprocess.run([OLLAMA_CMD, 'run', 'llama2', prompt], capture_output=True, text=True, check=True, timeout=60)
-            return (proc.stdout or proc.stderr or '').strip()
+            result = subprocess.run(
+                ["ollama", "run", os.environ.get("OLLAMA_MODEL", "llama3"), prompt],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            return result.stdout.strip()
         except Exception as e:
-            return f"[ollama error: {e}]"
+            return f"[Ollama Error] {e}"
 
     def _stub_vector(self, text: str) -> np.ndarray:
-        """Deterministic pseudo-vector from SHA256."""
         import hashlib
-        h = hashlib.sha256(text.encode('utf-8')).digest()
-        arr = np.frombuffer(h, dtype='uint8').astype('float32')
+        h = hashlib.sha256(text.encode("utf-8")).digest()
+        arr = np.frombuffer(h, dtype="uint8").astype("float32")
         if arr.size < VECTOR_DIM:
             arr = np.pad(arr, (0, VECTOR_DIM - arr.size), mode='wrap')
         return arr[:VECTOR_DIM]
 
-    def _floats_from_text(self, out: str) -> np.ndarray:
-        parts = []
-        for token in out.replace(',', ' ').split():
-            try:
-                parts.append(float(token))
-            except Exception:
-                continue
-        if not parts:
-            return np.zeros(VECTOR_DIM, dtype='float32')
-        arr = np.array(parts, dtype='float32')
-        if arr.size < VECTOR_DIM:
-            arr = np.pad(arr, (0, VECTOR_DIM - arr.size), mode='wrap')
-        elif arr.size > VECTOR_DIM:
-            arr = arr[:VECTOR_DIM]
-        return arr
+    def _stub_chat(self, prompt: str) -> str:
+        return f"[stub] No LLM connected. You asked: {prompt}"
